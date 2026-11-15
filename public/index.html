@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Query Dedupe Workbench</title>
+<meta name="description" content="A workbench for shared source queries: single-flight fetching, per-viewer freshness and field permissions, durable subscriptions, and crash-safe recovery.">
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true">Q</span>
+      <div>
+        <h1>Query Dedupe Workbench</h1>
+        <p class="tagline">One upstream fetch, many viewers, different permissions.</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div class="viewer-chip" id="viewer-chip" title="Active viewer">
+        <span class="dot" id="viewer-dot"></span>
+        <span id="viewer-name">No viewer</span>
+        <span class="role-pill" id="viewer-role">—</span>
+      </div>
+      <span class="instance" id="instance-label"></span>
+      <span class="live-dot" id="live-dot" title="Live updates">live</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <!-- LEFT COLUMN: identity + query composer -->
+    <section class="col col-left">
+      <article class="card">
+        <header class="card-head">
+          <h2>Viewers</h2>
+          <span class="hint">Each role gets a different field set from the same cached document.</span>
+        </header>
+        <div id="viewers-list" class="viewer-list" aria-live="polite"></div>
+        <form id="viewer-form" class="row-form">
+          <input id="viewer-label" type="text" maxlength="48" placeholder="New viewer name" aria-label="New viewer name" required>
+          <select id="viewer-role" aria-label="Viewer role">
+            <option value="public">Public</option>
+            <option value="analyst" selected>Analyst</option>
+            <option value="steward">Steward</option>
+          </select>
+          <button type="submit" class="btn btn-primary">Add viewer</button>
+        </form>
+        <div id="clearance-legend" class="legend"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Read a shared query</h2>
+          <span class="hint">Same text from different viewers joins one in-flight fetch.</span>
+        </header>
+        <form id="read-form" class="stack-form">
+          <div class="field">
+            <label for="read-source">Source</label>
+            <select id="read-source"></select>
+          </div>
+          <div class="field">
+            <label for="read-query">Query</label>
+            <input id="read-query" type="text" maxlength="240" value="web crawler" required>
+            <p class="field-hint" id="source-hint"></p>
+          </div>
+          <div class="split">
+            <div class="field">
+              <label for="read-max-age">Fresh for (seconds)</label>
+              <input id="read-max-age" type="number" min="0" step="1" value="120">
+            </div>
+            <div class="field">
+              <label for="read-stale">Serve stale if error (seconds)</label>
+              <input id="read-stale" type="number" min="0" step="1" value="0">
+            </div>
+          </div>
+          <div class="field">
+            <label for="read-locale">Locale <span class="muted">(part of the key)</span></label>
+            <input id="read-locale" type="text" maxlength="16" value="en">
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="read-button">Read</button>
+            <label class="check">
+              <input type="checkbox" id="read-parallel">
+              <span>Fire 3 viewers at once</span>
+            </label>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Durable subscription</h2>
+          <span class="hint">Receiver callbacks survive restarts; duplicates are absorbed by key.</span>
+        </header>
+        <form id="sub-form" class="stack-form">
+          <div class="field">
+            <label for="sub-source">Source</label>
+            <select id="sub-source"></select>
+          </div>
+          <div class="field">
+            <label for="sub-query">Query</label>
+            <input id="sub-query" type="text" maxlength="240" value="local-library: shared feeds" required>
+          </div>
+          <div class="split">
+            <div class="field">
+              <label for="sub-max-age">Refresh every (seconds)</label>
+              <input id="sub-max-age" type="number" min="1" step="1" value="30">
+            </div>
+            <div class="field">
+              <label for="sub-stale">Serve stale if error (seconds)</label>
+              <input id="sub-stale" type="number" min="0" step="1" value="300">
+            </div>
+          </div>
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Subscribe as active viewer</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card danger-zone">
+        <header class="card-head">
+          <h2>Failure drills</h2>
+          <span class="hint">Local, deterministic, and safe to run repeatedly.</span>
+        </header>
+        <div class="drill-grid">
+          <button class="btn btn-ghost" data-drill="crash">Simulate crash</button>
+          <button class="btn btn-ghost" data-drill="recover">Recover</button>
+          <button class="btn btn-ghost" data-drill="lose">Lose next notification</button>
+          <button class="btn btn-ghost" data-drill="expire">Age cache 1h</button>
+          <button class="btn btn-ghost" data-drill="fault-500">Receiver fails next 2</button>
+          <button class="btn btn-ghost" data-drill="fault-ack">Lose next ack</button>
+        </div>
+        <pre id="drill-output" class="drill-output" aria-live="polite"></pre>
+      </article>
+    </section>
+
+    <!-- MIDDLE COLUMN: result, tasks, documents -->
+    <section class="col col-main">
+      <article class="card result-card">
+        <header class="card-head">
+          <h2>Last read</h2>
+          <span id="result-badge" class="badge">idle</span>
+        </header>
+        <div id="result-note" class="notice hidden"></div>
+        <div id="result" class="result-body">
+          <p class="empty">Run a read to see what this viewer may observe.</p>
+        </div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Source tasks</h2>
+          <span class="hint" id="tasks-hint">Generations are per query; leaving only detaches you.</span>
+        </header>
+        <div id="tasks" class="task-list"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Shared cache</h2>
+          <span class="hint">One stored document per generation, projected at read time.</span>
+        </header>
+        <div id="documents" class="doc-list"></div>
+      </article>
+    </section>
+
+    <!-- RIGHT COLUMN: savings, subscriptions, receiver, events -->
+    <section class="col col-right">
+      <article class="card stats-card">
+        <header class="card-head">
+          <h2>Savings &amp; stale reads</h2>
+          <button class="btn btn-tiny" id="stats-info" title="How these numbers are counted">method</button>
+        </header>
+        <div id="stat-grid" class="stat-grid"></div>
+        <p class="hint" id="stats-method"></p>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Per-query ledger</h2>
+          <span class="hint">Survives restarts; rebuilt from the event log.</span>
+        </header>
+        <div id="insights" class="insight-list"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Subscriptions</h2>
+        </header>
+        <div id="subscriptions" class="sub-list"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Receiver inbox</h2>
+          <button class="btn btn-tiny" id="receiver-clear">clear</button>
+        </header>
+        <div id="receiver-stats" class="mini-stats"></div>
+        <div id="receiver-inbox" class="inbox-list"></div>
+      </article>
+
+      <article class="card">
+        <header class="card-head">
+          <h2>Event log</h2>
+          <select id="event-filter" class="mini-select" aria-label="Filter events">
+            <option value="">all events</option>
+            <option value="read">reads</option>
+            <option value="task">tasks</option>
+            <option value="delivery">deliveries</option>
+            <option value="recovery">recovery</option>
+          </select>
+        </header>
+        <ol id="events" class="event-list"></ol>
+      </article>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Sharing unit: source + normalized query + locale. Permissions are projected per viewer on every read.</span>
+    <span id="footer-status"></span>
+  </footer>
+</div>
+
+<div id="toasts" class="toasts" aria-live="polite" aria-atomic="false"></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>

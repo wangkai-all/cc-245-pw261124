@@ -1,0 +1,19 @@
+{
+  "name": "query-dedupe-workbench",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A workbench for shared source queries: single-flight fetching, per-viewer freshness and field permissions, durable subscriptions, and crash-safe recovery.",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
+  },
+  "engines": {
+    "node": ">=22.5"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "express": "^4.21.2"
+  }
+}
